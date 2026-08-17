@@ -60,3 +60,9 @@ export function windowsModuleLauncher(moduleName) {
     `"%PY%" -m ${moduleName} %*`,
   ].join('\r\n')
 }
+
+export function windowsBatchCommandArgs(scriptPath, args = []) {
+  // 路径和参数必须分开交给 spawnSync，由 Node 负责 Windows 参数转义；把带引号的
+  // 完整命令拼成单个 /c 参数会让 cmd.exe 把引号当成命令名的一部分。
+  return ['/d', '/c', scriptPath, ...args]
+}

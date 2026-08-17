@@ -13,6 +13,7 @@ import {
 import {
   configWithPythonHome,
   makeBundledBaseConfigPortable,
+  windowsBatchCommandArgs,
   windowsModuleLauncher,
   windowsVenvRebaseScript,
 } from '../scripts/runtime/python-runtime-layout.mjs'
@@ -92,6 +93,10 @@ test('Windows 启动器会在启动 Hermes 前重定位虚拟环境', () => {
   assert.match(rebase, /parents\[2\] \/ "base"/)
   assert.match(launcher, /base\\python\.exe.*rebase-venv\.py/)
   assert.match(launcher, /"%PY%" -m hermes_cli\.main/)
+  assert.deepEqual(
+    windowsBatchCommandArgs('C:\\Runtime Dir\\hermes.cmd', ['--version']),
+    ['/d', '/c', 'C:\\Runtime Dir\\hermes.cmd', '--version'],
+  )
 })
 
 test('发布工作流只使用本仓库的 Runtime 构建脚本', () => {

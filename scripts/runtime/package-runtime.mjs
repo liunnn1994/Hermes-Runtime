@@ -22,6 +22,7 @@ import {
   configWithPythonHome,
   makeBundledBaseConfigPortable,
   venvPythonPath,
+  windowsBatchCommandArgs,
 } from './python-runtime-layout.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -171,12 +172,10 @@ try {
       ),
     )
     const stagedHermes = join(stage, 'python', 'venv', 'Scripts', 'hermes.cmd')
-    const wrapperVersion = output('cmd.exe', [
-      '/d',
-      '/s',
-      '/c',
-      `call "${stagedHermes}" --version`,
-    ])
+    const wrapperVersion = output(
+      'cmd.exe',
+      windowsBatchCommandArgs(stagedHermes, ['--version']),
+    )
     if (!wrapperVersion.includes(hermesAgentVersion)) {
       console.error(`Windows 可迁移启动器版本校验失败：${wrapperVersion}`)
       process.exit(1)
