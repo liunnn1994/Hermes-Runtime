@@ -153,7 +153,7 @@ jobs:
           install_args: node python
 
       - name: 安装 uv
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v10.0.1
 
       - name: 准备可移植 Runtime
         env:
