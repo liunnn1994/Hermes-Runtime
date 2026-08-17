@@ -1,0 +1,15 @@
+{
+  "name": "hermes-runtime-releases",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node scripts/check-syntax.mjs && node --test test/release-plan.test.mjs test/runtime-config.test.mjs",
+    "sync:tools": "node scripts/sync-runtime-tools.mjs",
+    "prepare:runtime": "node scripts/runtime/prepare-runtime.mjs",
+    "package:runtime": "node scripts/runtime/package-runtime.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

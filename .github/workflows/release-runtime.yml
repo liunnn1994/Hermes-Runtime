@@ -1,0 +1,260 @@
+name: 发布 Hermes Runtime
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 注意：GitHub 会在仓库连续 60 天没有任何 commit 后自动停用定时工作流。
+    # 本仓库只有上游发新版时才会产生 commit（sync_tools 提交 mise 变更），
+    # 一旦 Hermes Agent 两个月不发版，轮询就会悄悄失效；届时需要手动用
+    # workflow_dispatch 触发一次来重新启用定时任务。
+    - cron: "17 */6 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hermes-runtime-release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: 检查上游 Release
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.plan.outputs.should_build }}
+      version: ${{ steps.plan.outputs.version }}
+      source_ref: ${{ steps.plan.outputs.source_ref }}
+      source_commit: ${{ steps.plan.outputs.source_commit }}
+      source_repository: ${{ steps.plan.outputs.source_repository }}
+      runtime_tag: ${{ steps.plan.outputs.runtime_tag }}
+      upstream_url: ${{ steps.plan.outputs.upstream_url }}
+      upstream_published_at: ${{ steps.plan.outputs.upstream_published_at }}
+    steps:
+      - name: 检出 Release 规划器
+        uses: actions/checkout@v7
+
+      - name: 使用 mise 配置 Node.js
+        uses: jdx/mise-action@v4
+        with:
+          install_args: node
+
+      - name: 测试 Release 规划器
+        run: npm run check
+
+      - name: 选择下一个 Hermes Agent Release
+        id: plan
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/release-plan.mjs
+
+      - name: 写入任务摘要
+        env:
+          SHOULD_BUILD: ${{ steps.plan.outputs.should_build }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          SOURCE_REF: ${{ steps.plan.outputs.source_ref }}
+          SOURCE_COMMIT: ${{ steps.plan.outputs.source_commit }}
+        run: |
+          if [ "$SHOULD_BUILD" = "true" ]; then
+            echo "正在打包 Hermes Agent $VERSION（$SOURCE_REF，${SOURCE_COMMIT:0:12}）。" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "没有发现尚未发布的 Hermes Agent 版本。" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  sync_tools:
+    name: 同步 Runtime 工具版本
+    needs: plan
+    if: needs.plan.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      runtime_commit: ${{ steps.commit.outputs.runtime_commit }}
+      node_version: ${{ steps.sync.outputs.node_version }}
+      python_version: ${{ steps.sync.outputs.python_version }}
+    steps:
+      - name: 检出默认分支
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: 配置 mise
+        uses: jdx/mise-action@v4
+        with:
+          install_args: node
+
+      - name: 读取 Hermes 工具要求并更新锁文件
+        id: sync
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HERMES_SOURCE_COMMIT: ${{ needs.plan.outputs.source_commit }}
+        run: node scripts/sync-runtime-tools.mjs
+
+      - name: 验证同步结果
+        run: npm run check
+
+      - name: 按需提交工具版本
+        id: commit
+        env:
+          HERMES_VERSION: ${{ needs.plan.outputs.version }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          # 注意：如果在检出到推送之间有其他 commit 抢先进入默认分支，这里的
+          # git push 会被拒绝并导致本次运行失败；由 concurrency 串行化后，
+          # 下一轮定时任务（最长 6 小时）会自动重试，无需人工干预。
+          if ! git diff --quiet -- mise.toml mise.lock; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add mise.toml mise.lock
+            git commit -m "同步 Hermes Agent $HERMES_VERSION 的 Runtime 工具版本"
+            git push origin "HEAD:$DEFAULT_BRANCH"
+          fi
+          echo "runtime_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: 构建 ${{ matrix.platform }}
+    needs: [plan, sync_tools]
+    if: needs.plan.outputs.should_build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: mac-arm64
+            runner: macos-14
+            target_os: darwin
+            target_arch: arm64
+          - platform: mac-x64
+            runner: macos-15-intel
+            target_os: darwin
+            target_arch: x64
+          - platform: win-x64
+            runner: windows-latest
+            target_os: win32
+            target_arch: x64
+          - platform: linux-x64
+            # 注意：刻意使用 ubuntu-22.04 而不是 ubuntu-latest，用较旧的 glibc
+            # 作为构建基线，保证产物在用户较旧的 Linux 系统上也能解压即用。
+            # 该镜像退役时不要顺手改成 latest，应改用当时的最低支持版本。
+            runner: ubuntu-22.04
+            target_os: linux
+            target_arch: x64
+          - platform: linux-arm64
+            runner: ubuntu-22.04-arm
+            target_os: linux
+            target_arch: arm64
+            skip_browser_runtime: "true"
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: 检出 Runtime 构建器
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.sync_tools.outputs.runtime_commit }}
+
+      - name: 使用 mise 配置 Runtime 工具
+        uses: jdx/mise-action@v4
+        with:
+          install_args: node python
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v10
+
+      - name: 准备可移植 Runtime
+        env:
+          TARGET_OS: ${{ matrix.target_os }}
+          TARGET_ARCH: ${{ matrix.target_arch }}
+          GH_TOKEN: ${{ github.token }}
+          HERMES_VERSION: ${{ needs.plan.outputs.version }}
+          HERMES_SOURCE_REPOSITORY: ${{ needs.plan.outputs.source_repository }}
+          HERMES_SOURCE_REF: ${{ needs.plan.outputs.source_ref }}
+          HERMES_SOURCE_COMMIT: ${{ needs.plan.outputs.source_commit }}
+          HERMES_SKIP_BROWSER_RUNTIME: ${{ matrix.skip_browser_runtime || 'false' }}
+        run: npm run prepare:runtime
+
+      - name: 打包并验证 Runtime 可迁移性
+        env:
+          TARGET_OS: ${{ matrix.target_os }}
+          TARGET_ARCH: ${{ matrix.target_arch }}
+          HERMES_VERSION: ${{ needs.plan.outputs.version }}
+          HERMES_SOURCE_REPOSITORY: ${{ needs.plan.outputs.source_repository }}
+          HERMES_SOURCE_REF: ${{ needs.plan.outputs.source_ref }}
+          HERMES_SOURCE_COMMIT: ${{ needs.plan.outputs.source_commit }}
+        run: npm run package:runtime
+
+      - name: 上传 Runtime 构建产物
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-${{ matrix.platform }}
+          path: |
+            release/runtime/*.tar.gz
+            release/runtime/*.sha256
+            release/runtime/*.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  publish:
+    name: 发布 Runtime Release
+    needs: [plan, sync_tools, build]
+    if: needs.plan.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.plan.outputs.runtime_tag }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      SOURCE_REF: ${{ needs.plan.outputs.source_ref }}
+      SOURCE_COMMIT: ${{ needs.plan.outputs.source_commit }}
+      UPSTREAM_URL: ${{ needs.plan.outputs.upstream_url }}
+      UPSTREAM_PUBLISHED_AT: ${{ needs.plan.outputs.upstream_published_at }}
+      RUNTIME_COMMIT: ${{ needs.sync_tools.outputs.runtime_commit }}
+    steps:
+      - name: 下载所有平台资产
+        uses: actions/download-artifact@v8
+        with:
+          pattern: runtime-*
+          path: dist
+          merge-multiple: true
+
+      - name: 验证完整资产集合
+        run: |
+          for platform in win-x64 mac-x64 mac-arm64 linux-x64 linux-arm64; do
+            archive="dist/hermes-runtime-hermes-agent-$VERSION-$platform.tar.gz"
+            checksum="$archive.sha256"
+            manifest="dist/hermes-runtime-$platform.json"
+            test -f "$archive"
+            test -f "$checksum"
+            test -f "$manifest"
+            (cd dist && sha256sum --check "hermes-runtime-hermes-agent-$VERSION-$platform.tar.gz.sha256")
+            listing="$RUNNER_TEMP/$platform-contents.txt"
+            tar -tzf "$archive" > "$listing"
+            for entry in ./python/ ./node/ ./git/ ./runtime-manifest.json; do
+              grep -Fx "$entry" "$listing" >/dev/null
+            done
+            jq -e --arg version "$VERSION" --arg platform "$platform" \
+              '.hermesAgentVersion == $version and .platform == $platform' \
+              "$manifest" >/dev/null
+            tar -xOzf "$archive" ./runtime-manifest.json \
+              | jq -e --arg version "$VERSION" --arg platform "$platform" \
+                  '.hermesAgentVersion == $version and .platform == $platform' >/dev/null
+          done
+
+      - name: 按需创建草稿 Release
+        run: |
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            cat > release-notes.md <<EOF
+          [Hermes Agent v$VERSION]($UPSTREAM_URL) 的可移植 Hermes Runtime。
+
+          - 上游 ref：\`$SOURCE_REF\`
+          - 上游 commit：\`$SOURCE_COMMIT\`
+          - 上游发布时间：\`$UPSTREAM_PUBLISHED_AT\`
+
+          每个压缩包均可直接解压为 Runtime 根目录，其中包含 \`python/\`、\`node/\`、\`git/\` 和 \`runtime-manifest.json\`。
+          EOF
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$RUNTIME_COMMIT" \
+              --title "Hermes Agent v$VERSION 的 Hermes Runtime" \
+              --notes-file release-notes.md \
+              --draft
+          fi
+
+      - name: 上传资产并原子发布
+        run: |
+          gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
