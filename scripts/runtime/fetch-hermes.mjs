@@ -80,6 +80,11 @@ if (fetchedCommit !== source.commit) {
 }
 
 // 保留真实的 main 分支，因为上游更新器默认从 main 更新。
+// contributors/ 只包含贡献者归属数据，不参与 Runtime 运行。上游可能在该
+// 目录提交仅大小写不同的文件名，Windows 和默认 macOS 文件系统无法
+// 同时检出它们，会让刚完成的 checkout 立即显示为脏工作树。
+run('git', ['sparse-checkout', 'init', '--no-cone'])
+run('git', ['sparse-checkout', 'set', '/*', '!/contributors/'])
 run('git', ['checkout', '-B', 'main', fetchedCommit])
 
 const installedCommit = output('git', ['rev-parse', 'HEAD']).toLowerCase()

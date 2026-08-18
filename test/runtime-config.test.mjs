@@ -114,3 +114,14 @@ test('发布工作流只使用本仓库的 Runtime 构建脚本', () => {
   assert.doesNotMatch(workflow, /\.builder\//i)
   assert.doesNotMatch(readme, /截至\s+\d{4}-\d{2}-\d{2}/)
 })
+
+test('Hermes 检出忽略跨平台不兼容的贡献者文件名', () => {
+  const fetchScript = readFileSync(resolve(ROOT, 'scripts/runtime/fetch-hermes.mjs'), 'utf-8')
+  const sparseInit = "run('git', ['sparse-checkout', 'init', '--no-cone'])"
+  const sparseSet = "run('git', ['sparse-checkout', 'set', '/*', '!/contributors/'])"
+  const checkout = "run('git', ['checkout', '-B', 'main', fetchedCommit])"
+
+  assert.match(fetchScript, /contributors\/.*Windows.*macOS/s)
+  assert.ok(fetchScript.indexOf(sparseInit) < fetchScript.indexOf(sparseSet))
+  assert.ok(fetchScript.indexOf(sparseSet) < fetchScript.indexOf(checkout))
+})
