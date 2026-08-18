@@ -109,7 +109,10 @@ test('发布工作流只使用本仓库的 Runtime 构建脚本', () => {
   assert.match(workflow, /git push origin "HEAD:\$DEFAULT_BRANCH"/)
   assert.match(workflow, /ref: \$\{\{ needs\.sync_tools\.outputs\.runtime_commit \}\}/)
   assert.doesNotMatch(workflow, /actions\/setup-node/)
-  assert.match(workflow, /uses: astral-sh\/setup-uv@v10\.0\.1/)
+  assert.match(
+    workflow,
+    /uses: astral-sh\/setup-uv@v10\.0\.1\s+with:[\s\S]*?cache-dependency-glob: mise\.lock\s+cache-suffix: hermes-\$\{\{ needs\.plan\.outputs\.source_commit \}\}/,
+  )
   assert.doesNotMatch(workflow, /^\s+repository:/m)
   assert.doesNotMatch(workflow, /\.builder\//i)
   assert.doesNotMatch(readme, /截至\s+\d{4}-\d{2}-\d{2}/)

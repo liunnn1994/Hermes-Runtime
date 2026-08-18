@@ -154,6 +154,12 @@ jobs:
 
       - name: 安装 uv
         uses: astral-sh/setup-uv@v10.0.1
+        with:
+          # Hermes 的 Python 依赖文件在下一步才会被拉取，因此不能使用
+          # setup-uv 的默认依赖 glob。mise.lock 跟踪 Python 工具版本，
+          # source commit 负责在 Hermes 依赖变化时使缓存失效。
+          cache-dependency-glob: mise.lock
+          cache-suffix: hermes-${{ needs.plan.outputs.source_commit }}
 
       - name: 准备可移植 Runtime
         env:
