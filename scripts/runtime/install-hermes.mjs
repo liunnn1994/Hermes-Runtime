@@ -150,6 +150,10 @@ function installHermesPythonRuntime() {
 
     console.log('→ 正在把经过哈希校验的 Hermes 依赖安装到内置 Python')
     run('uv', [
+      // requirements.txt 已是 uv.lock 的完整哈希投影。不要在安装时再读取
+      // Hermes pyproject.toml 的 override-dependencies，否则 uv 可能重新选择
+      // 未出现在导出文件中的新版本，从而必然缺少对应哈希。
+      '--no-config',
       'pip', 'install',
       '--python', pyBin,
       '--require-hashes',

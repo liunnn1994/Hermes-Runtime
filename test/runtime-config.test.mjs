@@ -128,3 +128,12 @@ test('Hermes 检出忽略跨平台不兼容的贡献者文件名', () => {
   assert.ok(fetchScript.indexOf(sparseInit) < fetchScript.indexOf(sparseSet))
   assert.ok(fetchScript.indexOf(sparseSet) < fetchScript.indexOf(checkout))
 })
+
+test('哈希锁定依赖安装不会被 Hermes 项目 override 重新解析', () => {
+  const installScript = readFileSync(resolve(ROOT, 'scripts/runtime/install-hermes.mjs'), 'utf-8')
+
+  assert.match(
+    installScript,
+    /run\('uv', \[\s*[\s\S]*?'--no-config',\s*'pip', 'install',\s*'--python', pyBin,\s*'--require-hashes',\s*'--no-deps',\s*'--requirement', requirementsPath,/,
+  )
+})
