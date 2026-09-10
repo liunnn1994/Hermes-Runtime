@@ -619,10 +619,13 @@ if (!SKIP_BROWSER_RUNTIME) {
     [
       'import os, shutil',
       `os.environ["PLAYWRIGHT_BROWSERS_PATH"] = ${JSON.stringify(PLAYWRIGHT_BROWSERS_PATH)}`,
-      'from tools.browser_tool import _chromium_installed',
+      'try:',
+      '    from tools.browser_tool_install import _chromium_installed',
+      'except ImportError:',
+      '    from tools.browser_tool import _chromium_installed',
       'assert shutil.which("agent-browser") is not None',
       'assert _chromium_installed()',
-    ].join('; '),
+    ].join('\n'),
   ], { env: browserRuntimeEnv() })
 }
 
