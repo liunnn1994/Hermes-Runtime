@@ -2,6 +2,12 @@ name: 发布 Hermes Runtime
 
 on:
   workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: '手动指定要打包的上游 Release tag（如 v2026.8.19），用于补发错过的版本；留空则自动选择下一个未发布版本'
+        required: false
+        type: string
+        default: ''
   schedule:
     # 注意：GitHub 会在仓库连续 60 天没有任何 commit 后自动停用定时工作流。
     # 本仓库只有上游发新版时才会产生 commit（sync_tools 提交 mise 变更），
@@ -29,6 +35,7 @@ jobs:
       runtime_tag: ${{ steps.plan.outputs.runtime_tag }}
       upstream_url: ${{ steps.plan.outputs.upstream_url }}
       upstream_published_at: ${{ steps.plan.outputs.upstream_published_at }}
+      mark_latest: ${{ steps.plan.outputs.mark_latest }}
     steps:
       - name: 检出 Release 规划器
         uses: actions/checkout@v7
@@ -45,6 +52,7 @@ jobs:
         id: plan
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          UPSTREAM_REF: ${{ inputs.upstream_ref }}
         run: node scripts/release-plan.mjs
 
       - name: 写入任务摘要
@@ -53,9 +61,14 @@ jobs:
           VERSION: ${{ steps.plan.outputs.version }}
           SOURCE_REF: ${{ steps.plan.outputs.source_ref }}
           SOURCE_COMMIT: ${{ steps.plan.outputs.source_commit }}
+          UPSTREAM_REF: ${{ inputs.upstream_ref }}
         run: |
           if [ "$SHOULD_BUILD" = "true" ]; then
-            echo "正在打包 Hermes Agent $VERSION（$SOURCE_REF，${SOURCE_COMMIT:0:12}）。" >> "$GITHUB_STEP_SUMMARY"
+            if [ -n "$UPSTREAM_REF" ]; then
+              echo "手动指定上游 ref，打包 Hermes Agent $VERSION（$SOURCE_REF，${SOURCE_COMMIT:0:12}）。" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "正在打包 Hermes Agent $VERSION（$SOURCE_REF，${SOURCE_COMMIT:0:12}）。" >> "$GITHUB_STEP_SUMMARY"
+            fi
           else
             echo "没有发现尚未发布的 Hermes Agent 版本。" >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -208,6 +221,7 @@ jobs:
       SOURCE_COMMIT: ${{ needs.plan.outputs.source_commit }}
       UPSTREAM_URL: ${{ needs.plan.outputs.upstream_url }}
       UPSTREAM_PUBLISHED_AT: ${{ needs.plan.outputs.upstream_published_at }}
+      MARK_LATEST: ${{ needs.plan.outputs.mark_latest }}
       RUNTIME_COMMIT: ${{ needs.sync_tools.outputs.runtime_commit }}
     steps:
       - name: 下载所有平台资产
@@ -263,4 +277,9 @@ jobs:
       - name: 上传资产并原子发布
         run: |
           gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          # 补发旧版本时（mark_latest=false）不能抢占 Latest 标记。
+          if [ "$MARK_LATEST" = "true" ]; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          else
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+          fi

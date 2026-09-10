@@ -110,9 +110,11 @@ export async function peelTagToCommit(github, repository, tagName) {
   throw new Error(`无法将 ${repository}@${tagName} 解析为 Git commit`)
 }
 
-export async function buildPlan({ repository, token = '', fetchImpl = fetch }) {
+export async function buildPlan({ repository, token = '', fetchImpl = fetch, upstreamRef = '' } = {}) {
   if (!repository?.includes('/')) throw new Error('GITHUB_REPOSITORY 必须使用 owner/name 格式')
   const github = createGithubClient({ token, fetchImpl })
+  if (upstreamRef) return buildManualPlan({ github, repository, upstreamRef })
+
   const [upstreamReleases, runtimeReleases] = await Promise.all([
     listReleases(github, UPSTREAM_REPOSITORY),
     listReleases(github, repository),
@@ -134,6 +136,54 @@ export async function buildPlan({ repository, token = '', fetchImpl = fetch }) {
     runtime_tag: `hermes-${selected.version}-runtime`,
     upstream_url: selected.html_url,
     upstream_published_at: selected.published_at,
+    // 自动模式只会选择比已发布版本更新的 Release，始终标记为 Latest。
+    mark_latest: 'true',
+  }
+}
+
+async function fetchReleaseByTag(github, tagName) {
+  try {
+    return await github(
+      `/repos/${UPSTREAM_REPOSITORY}/releases/tags/${encodeURIComponent(tagName)}`,
+    )
+  } catch (error) {
+    if (String(error.message).includes('返回 404')) {
+      throw new Error(`上游 ${UPSTREAM_REPOSITORY} 没有 tag 为 ${tagName} 的 Release（请确认该 tag 已正式发布且不是草稿）`)
+    }
+    throw error
+  }
+}
+
+// 手动补发模式：按调用方指定的上游 tag 构建，用于补齐错过自动轮询的版本。
+async function buildManualPlan({ github, repository, upstreamRef }) {
+  const release = await fetchReleaseByTag(github, upstreamRef)
+  const version = versionFromUpstreamRelease(release)
+  if (!version) {
+    throw new Error(`无法从上游 Release「${release?.name ?? upstreamRef}」解析 Hermes Agent 版本号（草稿、预发布或名称不含语义版本号）`)
+  }
+
+  const runtimeReleases = await listReleases(github, repository)
+  const publishedVersions = runtimeReleases
+    .map(versionFromRuntimeRelease)
+    .filter(Boolean)
+  if (publishedVersions.some(published => compareVersions(published, version) === 0)) {
+    throw new Error(`Runtime hermes-${version}-runtime 已经发布；如需重新构建请先删除该 Release`)
+  }
+
+  const sourceCommit = await peelTagToCommit(github, UPSTREAM_REPOSITORY, release.tag_name)
+  return {
+    should_build: 'true',
+    version,
+    source_ref: release.tag_name,
+    source_commit: sourceCommit,
+    source_repository: SOURCE_REPOSITORY,
+    runtime_tag: `hermes-${version}-runtime`,
+    upstream_url: release.html_url,
+    upstream_published_at: release.published_at,
+    // 补发旧版本时不能抢占 Latest 标记，只有当该版本不旧于任何已发布版本时才标记。
+    mark_latest: publishedVersions.every(published => compareVersions(version, published) >= 0)
+      ? 'true'
+      : 'false',
   }
 }
 
@@ -152,6 +202,7 @@ async function main() {
   const plan = await buildPlan({
     repository: process.env.GITHUB_REPOSITORY,
     token: process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '',
+    upstreamRef: (process.env.UPSTREAM_REF || '').trim(),
   })
   emitPlan(plan)
 }
