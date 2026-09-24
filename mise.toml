@@ -1,5 +1,5 @@
 [tools]
-node = "26.9.0"
+node = "26.10.0"
 python = { version = "3.11.16", patch_sysconfig = false }
 
 [settings]
