@@ -1,6 +1,6 @@
 [tools]
-node = "26.10.0"
-python = { version = "3.11.16", patch_sysconfig = false }
+node = "26.7.0"
+python = { version = "3.14.7", patch_sysconfig = false }
 
 [settings]
 python.compile = false
