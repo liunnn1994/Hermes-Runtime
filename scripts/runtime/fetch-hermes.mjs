@@ -109,7 +109,9 @@ if (versionResult.status !== 0) {
   process.exit(versionResult.status ?? 1)
 }
 const sourceVersion = versionResult.stdout.trim()
-if (sourceVersion !== source.version) {
+const stampWriter = resolve(SOURCE_DIR, 'scripts', 'write_install_stamp.py')
+const usesInstallStamp = sourceVersion === '0.0.0' && existsSync(stampWriter)
+if (sourceVersion !== source.version && !usesInstallStamp) {
   console.error(`Hermes 版本不匹配：预期 ${source.version}，源码声明 ${sourceVersion}`)
   process.exit(1)
 }
@@ -130,4 +132,13 @@ if (dirty) {
   process.exit(1)
 }
 
-console.log(`✓ Hermes 源码已准备完成：${SOURCE_DIR}（${sourceVersion}，${installedCommit.slice(0, 12)}）`)
+if (usesInstallStamp) {
+  run(pyBin, [
+    stampWriter, '--output', resolve(SOURCE_DIR, 'install-stamp.json'),
+    '--commit', source.commit, '--branch', 'main',
+    '--base-version', source.version, '--distance', '0',
+    '--source', 'git', '--update-mechanism', 'self',
+  ], { env: { ...process.env, HERMES_DESKTOP_VARIANT: '', HERMES_PAYLOAD_TAG: '' } })
+}
+
+console.log(`✓ Hermes 源码已准备完成：${SOURCE_DIR}（${source.version}，${installedCommit.slice(0, 12)}）`)

@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { platform as osPlatform, arch as osArch, homedir as osHomedir, tmpdir } from 'node:os'
 import { hermesSource } from './runtime-config.mjs'
+import { hermesIdentityPython } from './hermes-identity.mjs'
 import {
   venvPythonPath,
   windowsModuleLauncher,
@@ -537,11 +538,17 @@ run(pyBin, [
     'import importlib.util',
     'import mcp',
     'import tools.mcp_tool as t',
-    `assert metadata.version("hermes-agent") == ${JSON.stringify(HERMES_VERSION)}`,
     'assert t._MCP_AVAILABLE',
     'assert importlib.util.find_spec("websockets") is not None',
   ].join('; '),
 ])
+
+const identity = spawnSync(pyBin, ['-c', hermesIdentityPython(hermesSource().commit)], { encoding: 'utf-8' })
+if (identity.status !== 0 || identity.stdout.trim() !== HERMES_VERSION) {
+  process.stderr.write(identity.stderr || '')
+  console.error(`Hermes 运行版本不匹配：预期 ${HERMES_VERSION}，实际 ${identity.stdout.trim()}`)
+  process.exit(1)
+}
 
 const hermesBin = TARGET_OS === 'win32'
   ? resolve(VENV_DIR, 'Scripts', 'hermes.cmd')

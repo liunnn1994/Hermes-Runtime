@@ -17,6 +17,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { hermesSource } from './runtime-config.mjs'
+import { hermesIdentityPython } from './hermes-identity.mjs'
 import {
   bundledBaseHomePath,
   configWithPythonHome,
@@ -75,7 +76,7 @@ for (const dir of [PY_DIR, NODE_DIR]) {
 
 const hermesAgentVersion = output(pyBin, [
   '-c',
-  'import importlib.metadata as m; print(m.version("hermes-agent"))',
+  hermesIdentityPython(configuredSource.commit),
 ])
 if (hermesAgentVersion !== configuredSource.version) {
   console.error(
@@ -138,20 +139,20 @@ try {
       ),
     )
   }
-  const stagedVersion = output(stagedPython, [
+  output(stagedPython, [
     '-c',
     [
-      'import importlib.metadata as metadata',
       'from pathlib import Path',
       'import hermes_cli',
       `source = Path(${JSON.stringify(stagedSource)}).resolve()`,
       'module = Path(hermes_cli.__file__).resolve()',
       'assert module.is_relative_to(source), (module, source)',
-      'print(metadata.version("hermes-agent"))',
     ].join('; '),
   ])
-  if (stagedVersion !== hermesAgentVersion) {
-    console.error(`迁移后的 Hermes 版本不匹配：预期 ${hermesAgentVersion}，实际 ${stagedVersion}`)
+  // 验证迁移后的运行身份，包括 install stamp 中的源码 commit。
+  const stagedIdentity = output(stagedPython, ['-c', hermesIdentityPython(sourceCommit)])
+  if (stagedIdentity !== hermesAgentVersion) {
+    console.error(`迁移后的 Hermes 版本不匹配：预期 ${hermesAgentVersion}，实际 ${stagedIdentity}`)
     process.exit(1)
   }
   const stagedCommit = output('git', ['rev-parse', 'HEAD'], { cwd: stagedSource }).toLowerCase()
