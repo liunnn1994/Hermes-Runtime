@@ -31,6 +31,21 @@ export function parseWindowsInstaller(source) {
   }
 }
 
+export function parsePmLock(source) {
+  const lock = JSON.parse(source)
+  const versions = {}
+  for (const tool of ['node', 'python']) {
+    const version = lock.packages?.[tool]?.version
+    // Python 的 +YYYYMMDD 是 standalone 构建号，不属于 mise 的工具版本。
+    const match = typeof version === 'string'
+      ? version.match(/^(\d+\.\d+\.\d+)(?:\+\d+)?$/)
+      : null
+    if (!match) throw new Error(`Hermes Agent pm/lock.json 中的 ${tool} 版本无效`)
+    versions[tool] = match[1]
+  }
+  return versions
+}
+
 function compareVersionChannels(left, right) {
   const a = left.split('.').map(Number)
   const b = right.split('.').map(Number)
@@ -76,7 +91,7 @@ export function updateMiseConfig(source, versions) {
   return updated
 }
 
-async function fetchGithubFile(repository, commit, path, token, fetchImpl = fetch) {
+async function fetchGithubFile(repository, commit, path, token, fetchImpl = fetch, optional = false) {
   const response = await fetchImpl(
     `https://api.github.com/repos/${repository}/contents/${path}?ref=${commit}`,
     {
@@ -88,11 +103,24 @@ async function fetchGithubFile(repository, commit, path, token, fetchImpl = fetc
       },
     },
   )
+  if (optional && response.status === 404) return null
   if (!response.ok) {
     const body = await response.text()
     throw new Error(`读取 ${repository}@${commit}:${path} 失败（${response.status}）：${body.slice(0, 500)}`)
   }
   return response.text()
+}
+
+export async function readHermesToolRequirements(repository, commit, token, fetchImpl = fetch) {
+  const pmLock = await fetchGithubFile(repository, commit, 'pm/lock.json', token, fetchImpl, true)
+  if (pmLock !== null) return parsePmLock(pmLock)
+
+  // 补发 PM 迁移之前的 Release 时仍读取两个平台的安装脚本。
+  const [posixSource, windowsSource] = await Promise.all([
+    fetchGithubFile(repository, commit, 'scripts/install.sh', token, fetchImpl),
+    fetchGithubFile(repository, commit, 'scripts/install.ps1', token, fetchImpl),
+  ])
+  return selectHermesToolChannels(parsePosixInstaller(posixSource), parseWindowsInstaller(windowsSource))
 }
 
 function output(command, args) {
@@ -144,20 +172,14 @@ async function main() {
   }
 
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || ''
-  const [posixSource, windowsSource] = await Promise.all([
-    fetchGithubFile(repository, commit, 'scripts/install.sh', token),
-    fetchGithubFile(repository, commit, 'scripts/install.ps1', token),
-  ])
-  const posix = parsePosixInstaller(posixSource)
-  const windows = parseWindowsInstaller(windowsSource)
-  const channels = selectHermesToolChannels(posix, windows)
+  const channels = await readHermesToolRequirements(repository, commit, token)
   const versions = {
     node: resolveLatestVersion('node', channels.node),
     python: resolveLatestVersion('python', channels.python),
   }
 
   console.log(
-    `Hermes 工具要求：Node.js ${posix.node}/${windows.node}，Python ${channels.python}；`
+    `Hermes 工具要求：Node.js ${channels.node}，Python ${channels.python}；`
     + `mise 解析为 Node.js ${versions.node}、Python ${versions.python}`,
   )
   const previous = readFileSync(MISE_CONFIG, 'utf-8')

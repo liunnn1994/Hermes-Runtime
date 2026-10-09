@@ -7,6 +7,8 @@ import { hermesSource } from '../scripts/runtime/runtime-config.mjs'
 import {
   parsePosixInstaller,
   parseWindowsInstaller,
+  parsePmLock,
+  readHermesToolRequirements,
   selectHermesToolChannels,
   updateMiseConfig,
 } from '../scripts/sync-runtime-tools.mjs'
@@ -79,6 +81,43 @@ test('Runtime 工具版本从 Hermes 两个平台安装脚本同步', () => {
   )
   assert.match(updated, /^node = "26\.7\.0"$/m)
   assert.match(updated, /^python = \{ version = "3\.11\.16", patch_sysconfig = false \}$/m)
+})
+
+test('PM 锁文件版本优先于旧安装脚本并去除 Python 构建号', async () => {
+  const source = JSON.stringify({ packages: {
+    node: { version: '26.7.0' }, python: { version: '3.14.7+20260901' },
+  } })
+  assert.deepEqual(parsePmLock(source), { node: '26.7.0', python: '3.14.7' })
+  const urls = []
+  const versions = await readHermesToolRequirements('NousResearch/hermes-agent', 'abc', '', async url => {
+    urls.push(url)
+    return new Response(source)
+  })
+  assert.deepEqual(versions, { node: '26.7.0', python: '3.14.7' })
+  assert.deepEqual(urls, ['https://api.github.com/repos/NousResearch/hermes-agent/contents/pm/lock.json?ref=abc'])
+})
+
+test('只有缺少 PM 锁文件的旧 Release 才回退安装脚本', async () => {
+  const versions = await readHermesToolRequirements('upstream', 'abc', '', async url => {
+    if (url.includes('pm/lock.json')) return new Response('', { status: 404 })
+    return new Response(url.includes('install.sh')
+      ? 'PYTHON_VERSION="3.11"\nNODE_VERSION="26"\n'
+      : '$PythonVersion = "3.11"\n$NodeVersion = "22"\n')
+  })
+  assert.deepEqual(versions, { node: '26', python: '3.11' })
+  for (const status of [403, 500]) {
+    await assert.rejects(
+      readHermesToolRequirements('upstream', 'abc', '', async () => new Response('', { status })),
+      new RegExp(String(status)),
+    )
+  }
+  for (const version of [undefined, '3.14', '3.14.7rc1', '3.14.7+bad']) {
+    const source = JSON.stringify({ packages: { node: { version: '26.7.0' }, python: { version } } })
+    await assert.rejects(
+      readHermesToolRequirements('upstream', 'abc', '', async () => new Response(source)),
+      /python 版本无效/,
+    )
+  }
 })
 
 test('Python 虚拟环境配置可以在绝对路径和可移植路径之间切换', () => {
