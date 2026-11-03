@@ -90,6 +90,7 @@ function splitPackageList(value) {
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { stdio: 'inherit', ...options })
+  if (result.error) console.error(`无法执行 ${command}：${result.error.message}`)
   if (result.status !== 0) process.exit(result.status ?? 1)
   return result
 }
@@ -336,6 +337,7 @@ function extractChromeForTestingArchive(url, zipPath, extractDir) {
   run(pyBin, [
     '-c',
     [
+      'import os',
       'import sys',
       'import urllib.request',
       'import zipfile',
@@ -343,6 +345,12 @@ function extractChromeForTestingArchive(url, zipPath, extractDir) {
       'urllib.request.urlretrieve(url, zip_path)',
       'with zipfile.ZipFile(zip_path) as archive:',
       '    archive.extractall(extract_dir)',
+      // zipfile.extractall 不恢复 Unix 权限；Chrome 主程序和 helper 均需保留可执行位。
+      '    if os.name != "nt":',
+      '        for entry in archive.infolist():',
+      '            mode = (entry.external_attr >> 16) & 0o777',
+      '            if mode:',
+      '                os.chmod(os.path.join(extract_dir, entry.filename), mode)',
     ].join('\n'),
     url,
     zipPath,
@@ -630,7 +638,11 @@ if (!SKIP_BROWSER_RUNTIME) {
   }
   const env = browserRuntimeEnv()
   runInvocation(commandInvocation(agentBrowserCommand()), ['--version'], { env })
-  run(browserExecutable, ['--version'], { env })
+  // Windows 的 Chrome 不支持 --version，改用会正常退出的无头页面检查。
+  const chromeArgs = TARGET_OS === 'win32'
+    ? ['--headless', '--disable-gpu', '--no-sandbox', '--dump-dom', 'about:blank']
+    : ['--version']
+  run(browserExecutable, chromeArgs, { env, timeout: 60_000 })
 }
 
 if (SKIP_BROWSER_RUNTIME) {
