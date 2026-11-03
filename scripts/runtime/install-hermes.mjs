@@ -621,19 +621,16 @@ run(hermesCheckCommand, hermesCheckArgs)
 }
 
 if (!SKIP_BROWSER_RUNTIME) {
-  run(pyBin, [
-    '-c',
-    [
-      'import os, shutil',
-      `os.environ["PLAYWRIGHT_BROWSERS_PATH"] = ${JSON.stringify(PLAYWRIGHT_BROWSERS_PATH)}`,
-      'try:',
-      '    from tools.browser_tool_install import _chromium_installed',
-      'except ImportError:',
-      '    from tools.browser_tool import _chromium_installed',
-      'assert shutil.which("agent-browser") is not None',
-      'assert _chromium_installed()',
-    ].join('\n'),
-  ], { env: browserRuntimeEnv() })
+  // 浏览器由本仓库安装和打包，不依赖上游已移除的私有检测接口。
+  // 实际运行内置命令，避免仅凭文件存在就认定浏览器可用。
+  const browserExecutable = ensureBundledBrowserExecutable()
+  if (!browserExecutable) {
+    console.error(`找不到内置 Chrome 可执行文件：${AGENT_BROWSER_HOME}`)
+    process.exit(1)
+  }
+  const env = browserRuntimeEnv()
+  runInvocation(commandInvocation(agentBrowserCommand()), ['--version'], { env })
+  run(browserExecutable, ['--version'], { env })
 }
 
 if (SKIP_BROWSER_RUNTIME) {
