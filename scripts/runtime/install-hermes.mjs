@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   rmSync,
   writeFileSync,
@@ -510,19 +511,49 @@ function buildHermesFrontends() {
     process.exit(1)
   }
   const env = browserRuntimeEnv(false)
-  console.log('→ 正在安装 Hermes TUI/控制台工作区依赖')
-  runInvocation(npm, [
-    'ci',
-    '--no-audit',
-    '--no-fund',
-    '--progress=false',
-    '--workspace', 'ui-tui',
-    '--workspace', 'web',
-  ], { cwd: PY_DIR, env })
-  console.log('→ 正在构建 Hermes TUI')
-  runInvocation(npm, ['run', 'build', '--workspace', 'ui-tui'], { cwd: PY_DIR, env })
-  console.log('→ 正在构建 Hermes 控制台')
-  runInvocation(npm, ['run', 'build', '--workspace', 'web'], { cwd: PY_DIR, env })
+  if (existsSync(resolve(PY_DIR, 'pnpm-workspace.yaml'))) {
+    const version = JSON.parse(readFileSync(resolve(PY_DIR, 'pm', 'lock.json'), 'utf-8'))
+      .packages?.pnpm?.version
+    if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) {
+      throw new Error('Hermes pm/lock.json 缺少有效的 pnpm 版本')
+    }
+    const tools = mkdtempSync(join(tmpdir(), 'hermes-pnpm-'))
+    try {
+      console.log(`→ 正在使用上游锁定的 pnpm ${version} 构建 Hermes TUI/控制台`)
+      // pnpm 12 使用原生二进制，隔离安装以免覆盖宿主机的 pnpm。
+      const pkg = `@pnpm/exe.${TARGET_OS}-${TARGET_ARCH}`
+      runInvocation(npm, ['install', '--prefix', tools, '--no-audit', '--no-fund',
+        '--ignore-scripts', `${pkg}@${version}`], { cwd: tools, env })
+      const bin = resolve(tools, 'node_modules', pkg, TARGET_OS === 'win32' ? 'pnpm.exe' : 'pnpm')
+      const pathKey = TARGET_OS === 'win32' ? 'Path' : 'PATH'
+      env[pathKey] = `${dirname(bin)}${TARGET_OS === 'win32' ? ';' : ':'}${env[pathKey]}`
+      const installed = spawnSync(bin, ['--version'], { env, encoding: 'utf-8' })
+      if (installed.status !== 0 || installed.stdout.trim() !== version) {
+        throw new Error(`pnpm 版本校验失败，预期 ${version}：${installed.stderr || installed.stdout}`)
+      }
+      const pnpm = { command: bin, argsPrefix: [] }
+      runInvocation(pnpm, ['install', '--frozen-lockfile', '--trust-lockfile', '--prod=false',
+        '--filter', './ui-tui...', '--filter', './web...'], { cwd: PY_DIR, env })
+      runInvocation(pnpm, ['--filter', 'hermes-tui', 'run', 'build'], { cwd: PY_DIR, env })
+      runInvocation(pnpm, ['--filter', 'web', 'run', 'build'], { cwd: PY_DIR, env })
+    } finally {
+      rmSync(tools, { recursive: true, force: true })
+    }
+  } else {
+    console.log('→ 正在安装 Hermes TUI/控制台工作区依赖')
+    runInvocation(npm, [
+      'ci',
+      '--no-audit',
+      '--no-fund',
+      '--progress=false',
+      '--workspace', 'ui-tui',
+      '--workspace', 'web',
+    ], { cwd: PY_DIR, env })
+    console.log('→ 正在构建 Hermes TUI')
+    runInvocation(npm, ['run', 'build', '--workspace', 'ui-tui'], { cwd: PY_DIR, env })
+    console.log('→ 正在构建 Hermes 控制台')
+    runInvocation(npm, ['run', 'build', '--workspace', 'web'], { cwd: PY_DIR, env })
+  }
 
   for (const required of [
     resolve(PY_DIR, 'ui-tui', 'dist', 'entry.js'),

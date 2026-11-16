@@ -2,7 +2,7 @@
 // 清理内置 Python 环境中的缓存和测试文件，不修改外层 Hermes 源码 checkout。
 import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readdirSync, statSync, rmSync, existsSync } from 'node:fs'
+import { readdirSync, statSync, lstatSync, rmSync, existsSync } from 'node:fs'
 import { platform as osPlatform, arch as osArch } from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -48,7 +48,7 @@ function dirSize(dir) {
   try {
     for (const name of readdirSync(dir)) {
       const p = join(dir, name)
-      const st = statSync(p)
+      const st = lstatSync(p)
       total += st.isDirectory() ? dirSize(p) : st.size
     }
   } catch {}
@@ -63,6 +63,8 @@ for (const nodeModules of [
   join(PY_DIR, 'node_modules'),
   join(PY_DIR, 'ui-tui', 'node_modules'),
   join(PY_DIR, 'web', 'node_modules'),
+  join(PY_DIR, 'apps', 'shared', 'node_modules'),
+  join(PY_DIR, 'ui-tui', 'packages', 'hermes-ink', 'node_modules'),
 ]) {
   if (!existsSync(nodeModules)) continue
   bytesFreed += dirSize(nodeModules)
