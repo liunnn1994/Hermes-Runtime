@@ -134,11 +134,12 @@ jobs:
       matrix:
         include:
           - platform: mac-arm64
-            runner: macos-14
+            runner: macos-latest
             target_os: darwin
             target_arch: arm64
           - platform: mac-x64
-            runner: macos-15-intel
+            # 标准 Intel 运行器没有 latest 别名。
+            runner: macos-26-intel
             target_os: darwin
             target_arch: x64
           - platform: win-x64
@@ -146,14 +147,12 @@ jobs:
             target_os: win32
             target_arch: x64
           - platform: linux-x64
-            # 注意：刻意使用 ubuntu-22.04 而不是 ubuntu-latest，用较旧的 glibc
-            # 作为构建基线，保证产物在用户较旧的 Linux 系统上也能解压即用。
-            # 该镜像退役时不要顺手改成 latest，应改用当时的最低支持版本。
-            runner: ubuntu-22.04
+            runner: ubuntu-latest
             target_os: linux
             target_arch: x64
           - platform: linux-arm64
-            runner: ubuntu-22.04-arm
+            # ARM64 运行器没有 latest 别名，使用当前最新版本。
+            runner: ubuntu-26.04-arm
             target_os: linux
             target_arch: arm64
             skip_browser_runtime: "true"
