@@ -167,7 +167,7 @@ async function buildManualPlan({ github, repository, upstreamRef }) {
     .map(versionFromRuntimeRelease)
     .filter(Boolean)
   if (publishedVersions.some(published => compareVersions(published, version) === 0)) {
-    throw new Error(`Runtime hermes-${version}-runtime 已经发布；如需重新构建请先删除该 Release`)
+    return { should_build: 'false' }
   }
 
   const sourceCommit = await peelTagToCommit(github, UPSTREAM_REPOSITORY, release.tag_name)

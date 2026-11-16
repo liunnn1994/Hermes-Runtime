@@ -132,19 +132,71 @@ test('手动指定最新版本时保留 Latest 标记', async () => {
   assert.equal(plan.mark_latest, 'true')
 })
 
-test('手动指定的版本已发布时报错而不是重复构建', async () => {
-  await assert.rejects(
-    buildPlan({
+test('手动指定的版本已发布时成功跳过且不解析源码', async () => {
+  const plan = await buildPlan({
+    repository: 'example/runtime',
+    fetchImpl: fakeGithub(new Map([
+      ['/repos/NousResearch/hermes-agent/releases/tags/v2026.8.19', UPSTREAM_RELEASE],
+      ['/repos/example/runtime/releases?per_page=100&page=1', [runtime('0.20.5')]],
+    ])),
+    upstreamRef: 'v2026.8.19',
+  })
+  assert.deepEqual(plan, { should_build: 'false' })
+})
+
+test('四段日期 tag 解析为语义版本并生成完整构建计划', async () => {
+  const tag = 'v2026.8.16.2'
+  const plan = await buildPlan({
+    repository: 'example/runtime',
+    fetchImpl: fakeGithub(new Map([
+      [`/repos/NousResearch/hermes-agent/releases/tags/${tag}`, upstream('0.20.3', tag, {
+        published_at: '2026-08-16T00:00:00Z',
+      })],
+      [`/repos/NousResearch/hermes-agent/git/ref/tags/${tag}`, {
+        object: { type: 'commit', sha: 'f'.repeat(40) },
+      }],
+      ['/repos/example/runtime/releases?per_page=100&page=1', []],
+    ])),
+    upstreamRef: tag,
+  })
+  assert.deepEqual(plan, {
+    should_build: 'true',
+    version: '0.20.3',
+    source_ref: tag,
+    source_commit: 'f'.repeat(40),
+    source_repository: 'https://github.com/NousResearch/hermes-agent.git',
+    runtime_tag: 'hermes-0.20.3-runtime',
+    upstream_url: `https://example.test/${tag}`,
+    upstream_published_at: '2026-08-16T00:00:00Z',
+    mark_latest: 'true',
+  })
+})
+
+test('手动指定上游草稿或预发布版本时报错', async () => {
+  for (const extra of [{ draft: true }, { prerelease: true }]) {
+    await assert.rejects(buildPlan({
       repository: 'example/runtime',
       fetchImpl: fakeGithub(new Map([
-        ['/repos/NousResearch/hermes-agent/releases/tags/v2026.8.19', UPSTREAM_RELEASE],
-        ...ANNOTATED_TAG_RESPONSES,
-        ['/repos/example/runtime/releases?per_page=100&page=1', [runtime('0.20.5')]],
+        ['/repos/NousResearch/hermes-agent/releases/tags/v2026.8.19', {
+          ...UPSTREAM_RELEASE, ...extra,
+        }],
       ])),
       upstreamRef: 'v2026.8.19',
-    }),
-    /已经发布/,
-  )
+    }), /无法从上游 Release/)
+  }
+})
+
+test('已有草稿 Runtime Release 时仍可重试构建', async () => {
+  const plan = await buildPlan({
+    repository: 'example/runtime',
+    fetchImpl: fakeGithub(new Map([
+      ['/repos/NousResearch/hermes-agent/releases/tags/v2026.8.19', UPSTREAM_RELEASE],
+      ...ANNOTATED_TAG_RESPONSES,
+      ['/repos/example/runtime/releases?per_page=100&page=1', [runtime('0.20.5', { draft: true })]],
+    ])),
+    upstreamRef: 'v2026.8.19',
+  })
+  assert.equal(plan.should_build, 'true')
 })
 
 test('手动指定不存在的上游 ref 时报错', async () => {

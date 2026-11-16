@@ -21,6 +21,19 @@ Hermes Agent 官方 Release，同时支持手动触发。
   该提交，保证发布资产与仓库中记录的工具版本完全一致。
 - 所有平台的压缩包、清单文件和 SHA-256 文件齐全且校验通过前，Release 始终保持草稿状态。
 
+## 手动生成指定版本
+
+在 GitHub 仓库的 **Actions → 发布 Hermes Runtime → Run workflow** 中，
+填写 `upstream_ref` 后执行。这里使用上游 Release 的 tag，例如 `v2026.8.16.2`，
+对应 Hermes Agent `0.20.3`；不要填写 `0.20.3`。
+
+- 自动从该 Release 解析 Hermes Agent 版本，生成五个平台的产物并发布到
+  本仓库的 `hermes-0.20.3-runtime` Release。
+- 如果对应的正式 Runtime Release 已存在，工作流成功跳过，不再构建或上传产物。
+- 未完成发布的草稿仍可重试；补发旧版本不会抢占 Latest 标记。
+- tag 不存在、上游 Release 为草稿或预发布时，工作流报错。
+- `upstream_ref` 留空时沿用自动选择规则。
+
 ## Runtime 内容
 
 本仓库自己的构建脚本位于 [`scripts/runtime`](scripts/runtime)，负责：
