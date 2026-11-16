@@ -533,7 +533,7 @@ function buildHermesFrontends() {
       }
       const pnpm = { command: bin, argsPrefix: [] }
       runInvocation(pnpm, ['install', '--frozen-lockfile', '--trust-lockfile', '--prod=false',
-        '--filter', './ui-tui...', '--filter', './web...'], { cwd: PY_DIR, env })
+        '--filter', '{./ui-tui}...', '--filter', '{./web}...'], { cwd: PY_DIR, env })
       runInvocation(pnpm, ['--filter', 'hermes-tui', 'run', 'build'], { cwd: PY_DIR, env })
       runInvocation(pnpm, ['--filter', 'web', 'run', 'build'], { cwd: PY_DIR, env })
     } finally {
